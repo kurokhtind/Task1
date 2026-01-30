@@ -1,4 +1,4 @@
-name: Android APK Build with Java 21
+name: Build Android APK
 
 on: [push]
 
@@ -9,64 +9,168 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     
+    - name: Setup Java 21
+      uses: actions/setup-java@v4
+      with:
+        java-version: '21'
+        distribution: 'temurin'
+    
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
         node-version: '18'
     
-    - name: Setup Java 21
-      uses: actions/setup-java@v4
-      with:
-        distribution: 'temurin'
-        java-version: '21'
-    
-    - name: Prepare project
+    - name: Clean and setup project
       run: |
-        echo '{"name":"levelup-app","version":"1.0.0"}' > package.json
-        mkdir -p www
-        echo '<html><body><h1>LevelUp</h1></body></html>' > www/index.html
+        # Удаляем старые папки
+        rm -rf android www node_modules
         
-        # Копируем ваши файлы
-        cp *.html www/ 2>/dev/null || true
-        cp *.css www/ 2>/dev/null || true
-        cp *.js www/ 2>/dev/null || true
+        # Создаём package.json с правильным именем
+        echo '{
+          "name": "levelup-app",
+          "version": "1.0.0",
+          "private": true
+        }' > package.json
+        
+        # Создаём веб-папку с минимальным контентом
+        mkdir -p www
+        echo '<!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>LevelUp App</title>
+        </head>
+        <body>
+          <h1>LevelUp - Геймификация жизни</h1>
+          <p>Ваше Android приложение</p>
+        </body>
+        </html>' > www/index.html
     
     - name: Install Capacitor
       run: |
-        npm install @capacitor/cli @capacitor/android
+        npm install @capacitor/cli @capacitor/core @capacitor/android
     
-    - name: Configure Capacitor
+    - name: Initialize Capacitor with fresh config
       run: |
-        echo '{"appId":"com.levelup.app","appName":"LevelUp","webDir":"www"}' > capacitor.config.json
-        npx cap init
+        # Создаём конфиг Capacitor
+        echo '{
+          "appId": "com.levelup.app",
+          "appName": "LevelUp",
+          "webDir": "www",
+          "bundledWebRuntime": false
+        }' > capacitor.config.json
+        
+        # Инициализируем Capacitor (неинтерактивно)
+        npx cap init "LevelUp" "com.levelup.app" --web-dir www --npm-client npm
+        
+        # Добавляем Android платформу
         npx cap add android
+        
+        # Копируем файлы
         npx cap copy
     
-    - name: Use Android setup action
-      uses: android-actions/setup-android@v3
-    
-    - name: Fix compile options for Java 21
+    - name: Fix Android build.gradle files
       run: |
+        # Исправляем основной build.gradle
         cd android
         
-        # Создаём или обновляем gradle.properties
+        # Удаляем повреждённый файл и создаём новый
+        rm -f app/build.gradle
+        
+        # Создаём правильный app/build.gradle
+        cat > app/build.gradle << 'EOF'
+        apply plugin: 'com.android.application'
+
+        android {
+            namespace "com.levelup.app"
+            compileSdkVersion rootProject.ext.compileSdkVersion
+            defaultConfig {
+                applicationId "com.levelup.app"
+                minSdkVersion rootProject.ext.minSdkVersion
+                targetSdkVersion rootProject.ext.targetSdkVersion
+                versionCode 1
+                versionName "1.0"
+            }
+            buildTypes {
+                debug {
+                    minifyEnabled false
+                    proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+                }
+                release {
+                    minifyEnabled false
+                    proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+                }
+            }
+        }
+
+        dependencies {
+            implementation fileTree(include: ['*.jar'], dir: 'libs')
+            implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
+            implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
+            implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
+            implementation project(':capacitor-android')
+        }
+        EOF
+        
+        # Создаём build.gradle для корня
+        cat > build.gradle << 'EOF'
+        buildscript {
+            ext {
+                compileSdkVersion = 34
+                targetSdkVersion = 34
+                minSdkVersion = 22
+                androidxActivityVersion = '1.8.0'
+                androidxAppCompatVersion = '1.6.1'
+                androidxCoordinatorLayoutVersion = '1.2.0'
+                androidxCoreVersion = '1.12.0'
+                androidxFragmentVersion = '1.6.2'
+                coreSplashScreenVersion = '1.0.1'
+                androidxWebkitVersion = '1.9.0'
+                junitVersion = '4.13.2'
+                androidxJunitVersion = '1.1.5'
+                androidxEspressoCoreVersion = '3.5.1'
+                cordovaAndroidVersion = '10.1.1'
+            }
+            repositories {
+                google()
+                mavenCentral()
+            }
+            dependencies {
+                classpath 'com.android.tools.build:gradle:8.2.1'
+                classpath 'com.google.gms:google-services:4.4.0'
+            }
+        }
+
+        allprojects {
+            repositories {
+                google()
+                mavenCentral()
+            }
+        }
+
+        task clean(type: Delete) {
+            delete rootProject.buildDir
+        }
+        EOF
+        
+        # Создаём gradle.properties
         echo "org.gradle.jvmargs=-Xmx2048m" > gradle.properties
         echo "android.useAndroidX=true" >> gradle.properties
         echo "android.enableJetifier=true" >> gradle.properties
-        
-        # Обновляем compileOptions в build.gradle если нужно
-        if ! grep -q "sourceCompatibility JavaVersion.VERSION_21" app/build.gradle; then
-          # Добавляем compileOptions для Java 21
-          awk '/android *{/{print $0 RS "    compileOptions {"; next} /compileOptions *{/{found=1} found && /sourceCompatibility/{print "        sourceCompatibility JavaVersion.VERSION_21"; next} found && /targetCompatibility/{print "        targetCompatibility JavaVersion.VERSION_21"; next} {print}' app/build.gradle > app/build.gradle.tmp
-          mv app/build.gradle.tmp app/build.gradle
-        fi
+    
+    - name: Setup Android SDK
+      uses: android-actions/setup-android@v3
     
     - name: Build APK
       run: |
         cd android
-        ./gradlew assembleDebug --no-daemon
+        chmod +x gradlew
+        
+        # Собираем APK
+        ./gradlew clean assembleDebug --no-daemon
     
     - uses: actions/upload-artifact@v4
       with:
-        name: levelup-apk
+        name: levelup-android-apk
         path: android/app/build/outputs/apk/debug/*.apk
