@@ -1,4 +1,4 @@
-name: Build Web to Android APK
+name: Build Android APK
 
 on: [push]
 
@@ -9,114 +9,133 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     
-    - name: Setup Node.js and npm
+    - name: Fix package.json name
       run: |
-        # Устанавливаем Node.js вручную (без setup-node action)
-        curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
-        sudo apt-get install -y nodejs
+        # Проверяем есть ли package.json
+        if [ -f "package.json" ]; then
+          echo "Исправляем имя в package.json..."
+          # Убираем двоеточие и кириллицу из имени
+          sed -i 's/"name":.*/"name": "levelup-gamification-life",/' package.json
+          # Или создаём новый если не получается исправить
+          echo '{
+            "name": "levelup-app",
+            "version": "1.0.0",
+            "private": true
+          }' > package.json
+        else
+          # Создаём package.json с правильным именем
+          echo '{
+            "name": "levelup-app",
+            "version": "1.0.0",
+            "private": true
+          }' > package.json
+        fi
         
-        # Проверяем установку
-        node --version
-        npm --version
+        # Показываем что получилось
+        cat package.json
     
-    - name: Create project structure
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+    
+    - name: Create web content
       run: |
-        # Создаём папку для веб-приложения
+        # Создаём папку для веб-файлов
         mkdir -p www
         
-        # Копируем существующие файлы или создаём демо
-        if ls *.html 1> /dev/null 2>&1; then
-          cp *.html www/ 2>/dev/null || true
+        # Проверяем есть ли index.html в проекте
+        if [ -f "index.html" ]; then
+          echo "Копируем существующий index.html..."
+          cp index.html www/
         else
+          # Создаём простой index.html
           echo '<!DOCTYPE html>
-          <html lang="en">
+          <html>
           <head>
             <meta charset="UTF-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>My Application</title>
+            <title>LevelUp App</title>
             <style>
-              body { font-family: Arial, sans-serif; text-align: center; padding: 2rem; }
-              h1 { color: #2196F3; }
+              body { font-family: Arial, sans-serif; padding: 20px; text-align: center; }
+              h1 { color: #4CAF50; }
             </style>
           </head>
           <body>
-            <h1>My Web App</h1>
-            <p>Successfully converted to Android APK!</p>
+            <h1>🎮 LevelUp App</h1>
+            <p>Геймификация жизни для Android</p>
           </body>
           </html>' > www/index.html
         fi
         
-        # Копируем остальные файлы
+        # Копируем другие веб-файлы если есть
         cp *.css www/ 2>/dev/null || true
         cp *.js www/ 2>/dev/null || true
+        [ -d "css" ] && cp -r css www/
+        [ -d "js" ] && cp -r js www/
+        [ -d "assets" ] && cp -r assets www/
+        
+        echo "Содержимое www:"
+        ls -la www/
     
-    - name: Install Capacitor with specific version
+    - name: Install Capacitor
       run: |
-        # Устанавливаем конкретную версию Capacitor (более стабильную)
-        npm init -y
-        npm install @capacitor/core@^5.0.0 @capacitor/cli@^5.0.0 @capacitor/android@^5.0.0
+        # Устанавливаем Capacitor без глобальной установки
+        npm install @capacitor/core @capacitor/cli @capacitor/android
     
-    - name: Configure Capacitor manually
+    - name: Configure Capacitor
       run: |
-        # Создаём конфигурационный файл вручную
-        cat > capacitor.config.json << 'CONFIG'
-        {
-          "appId": "com.mycompany.myapp",
-          "appName": "MyApp",
+        # Создаём конфиг для Capacitor
+        echo '{
+          "appId": "com.levelup.app",
+          "appName": "LevelUp",
           "webDir": "www",
-          "bundledWebRuntime": false,
-          "plugins": {
-            "SplashScreen": {
-              "launchShowDuration": 3000
-            }
-          }
-        }
-        CONFIG
+          "bundledWebRuntime": false
+        }' > capacitor.config.json
         
-        # Инициализируем Capacitor (пропускаем вопросы)
-        npx cap init --app-name "MyApp" --app-id "com.mycompany.myapp" --web-dir www --npm-client npm --force
+        # Инициализируем Capacitor (неинтерактивно)
+        npx cap init "LevelUp" "com.levelup.app" --web-dir www
         
-        # Добавляем Android платформу
+        # Добавляем Android
         npx cap add android
-    
-    - name: Copy web assets to Android
-      run: |
-        npx cap copy
-        npx cap sync android
-    
-    - name: Setup Android build environment
-      run: |
-        # Устанавливаем Java 11
-        sudo apt update
-        sudo apt install -y openjdk-11-jdk-headless
         
-        # Скачиваем Android Command Line Tools
+        # Копируем файлы
+        npx cap copy
+        
+        # Синхронизируем
+        npx cap sync
+    
+    - name: Setup Android SDK
+      run: |
+        # Устанавливаем Java
+        sudo apt update
+        sudo apt install -y openjdk-11-jdk
+        
+        # Устанавливаем Android SDK
         wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
         unzip -q commandlinetools-linux-9477386_latest.zip
         
         # Создаём структуру Android SDK
-        mkdir -p android-sdk
-        mv cmdline-tools android-sdk/
+        mkdir -p android-sdk/cmdline-tools
+        mv cmdline-tools android-sdk/cmdline-tools/latest
         
-        # Устанавливаем переменные окружения
-        echo "ANDROID_SDK_ROOT=$PWD/android-sdk" >> $GITHUB_ENV
-        echo "PATH=$PATH:$PWD/android-sdk/cmdline-tools/bin" >> $GITHUB_ENV
+        # Настраиваем переменные окружения
+        export ANDROID_HOME=$(pwd)/android-sdk
+        export PATH=$PATH:$ANDROID_HOME/cmdline-tools/latest/bin
         
-        # Принимаем лицензии (автоматически)
-        yes | $PWD/android-sdk/cmdline-tools/bin/sdkmanager --licenses > /dev/null 2>&1
+        # Принимаем лицензии
+        yes | sdkmanager --licenses >/dev/null 2>&1
         
         # Устанавливаем необходимые компоненты
-        $PWD/android-sdk/cmdline-tools/bin/sdkmanager "platform-tools" "platforms;android-33" "build-tools;33.0.0" > /dev/null 2>&1
+        sdkmanager "platform-tools" "platforms;android-33" "build-tools;33.0.0" >/dev/null 2>&1
     
-    - name: Build Android APK
+    - name: Build APK
       run: |
         cd android
         chmod +x gradlew
-        ./gradlew assembleDebug --no-daemon --stacktrace
+        ./gradlew assembleDebug
     
-    - name: Upload APK artifact
-      uses: actions/upload-artifact@v4
+    - uses: actions/upload-artifact@v4
       with:
-        name: android-application
+        name: levelup-apk
         path: android/app/build/outputs/apk/debug/*.apk
-        retention-days: 7
