@@ -9,98 +9,78 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     
-    - name: Prepare environment
-      run: |
-        # Удаляем файл dist если он существует как файл
-        if [ -f "dist" ]; then
-          echo "Удаляем файл dist"
-          rm -f dist
-        fi
-        
-        # Удаляем папку dist если она существует
-        if [ -d "dist" ]; then
-          echo "Удаляем папку dist"
-          rm -rf dist
-        fi
-        
-        # Создаём новую папку dist
-        mkdir -p dist
-        echo "Папка dist создана"
-        
-        # Показываем текущую директорию
-        pwd
-        ls -la
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
     
-    - name: Copy web files
+    - name: Prepare dist folder
       run: |
-        # Копируем файлы в dist
-        echo "Копируем файлы..."
+        # Удаляем старые папки
+        rm -rf dist android
         
-        # HTML файлы
-        for file in *.html; do
-          if [ -f "$file" ]; then
-            cp "$file" dist/
-            echo "Скопирован: $file"
-          fi
-        done
+        # Создаём dist и копируем файлы
+        mkdir -p dist
         
-        # CSS файлы
-        for file in *.css; do
-          if [ -f "$file" ]; then
-            cp "$file" dist/
-            echo "Скопирован: $file"
-          fi
-        done
+        # Копируем HTML файлы
+        find . -name "*.html" -not -path "./node_modules/*" -not -path "./dist/*" -exec cp {} dist/ \;
         
-        # JS файлы
-        for file in *.js; do
-          if [ -f "$file" ]; then
-            cp "$file" dist/
-            echo "Скопирован: $file"
-          fi
-        done
+        # Копируем CSS файлы
+        find . -name "*.css" -not -path "./node_modules/*" -not -path "./dist/*" -exec cp {} dist/ \;
         
-        # Копируем папки если они есть
-        [ -d "css" ] && cp -r css dist/ && echo "Скопирована папка: css"
-        [ -d "js" ] && cp -r js dist/ && echo "Скопирована папка: js"
-        [ -d "images" ] && cp -r images dist/ && echo "Скопирована папка: images"
-        [ -d "assets" ] && cp -r assets dist/ && echo "Скопирована папка: assets"
+        # Копируем JS файлы
+        find . -name "*.js" -not -path "./node_modules/*" -not -path "./dist/*" -exec cp {} dist/ \;
         
-        # Показываем что получилось
-        echo "Содержимое dist:"
+        # Если нет index.html, создаём его
+        if [ ! -f "dist/index.html" ]; then
+          cat > dist/index.html << 'EOF'
+          <!DOCTYPE html>
+          <html>
+          <head>
+              <meta charset="utf-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1">
+              <title>My App</title>
+          </head>
+          <body>
+              <h1>Welcome to My App</h1>
+              <p>This is a web application converted to Android.</p>
+          </body>
+          </html>
+          EOF
+          echo "Created default index.html"
+        fi
+        
+        echo "Files in dist:"
         ls -la dist/
     
     - name: Install Capacitor
       run: |
-        # Устанавливаем Node.js если не установлен
-        if ! command -v node &> /dev/null; then
-          echo "Устанавливаем Node.js..."
-          curl -fsSL https://deb.nodesource.com/setup_18.x | bash -
-          apt-get install -y nodejs
-        fi
-        
-        npm install -g @capacitor/cli
+        # Устанавливаем Capacitor глобально
+        npm install -g @capacitor/cli @capacitor/core @capacitor/android
     
     - name: Initialize Capacitor
       run: |
-        # Проверяем есть ли файлы в dist
-        if [ -z "$(ls -A dist/ 2>/dev/null)" ]; then
-          echo "Папка dist пуста, создаём index.html"
-          echo '<!DOCTYPE html>
-          <html>
-          <head>
-              <title>My App</title>
-          </head>
-          <body>
-              <h1>Hello World!</h1>
-          </body>
-          </html>' > dist/index.html
-        fi
+        # Создаём конфигурационный файл вручную
+        cat > capacitor.config.json << 'EOF'
+        {
+          "appId": "com.myapp.android",
+          "appName": "MyApp",
+          "webDir": "dist",
+          "bundledWebRuntime": false
+        }
+        EOF
         
-        # Инициализируем Capacitor
-        npx cap init "MyApp" "com.example.myapp" --web-dir dist -y
+        # Инициализируем Capacitor без интерактивного режима
+        npx cap init "MyApp" "com.myapp.android" --web-dir dist
+        
+        # Добавляем Android платформу
         npx cap add android
+        
+        # Копируем файлы
         npx cap copy
+        
+        # Синхронизируем
+        npx cap sync
     
     - name: Setup Android SDK
       run: |
@@ -108,37 +88,39 @@ jobs:
         apt-get update
         apt-get install -y openjdk-11-jdk
         
-        # Устанавливаем Android SDK
-        mkdir -p android-sdk
-        cd android-sdk
+        # Создаём Android SDK директорию
+        mkdir -p /home/runner/android-sdk
         
         # Скачиваем Command Line Tools
+        cd /home/runner/android-sdk
         wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
         unzip -q commandlinetools-linux-9477386_latest.zip
         
         # Настраиваем переменные окружения
-        export ANDROID_SDK_ROOT=$(pwd)
-        export PATH=$PATH:$(pwd)/cmdline-tools/bin
+        echo "ANDROID_SDK_ROOT=/home/runner/android-sdk" >> $GITHUB_ENV
+        echo "PATH=$PATH:/home/runner/android-sdk/cmdline-tools/bin" >> $GITHUB_ENV
         
         # Принимаем лицензии
-        yes | sdkmanager --licenses || true
+        yes | cmdline-tools/bin/sdkmanager --licenses || true
         
-        # Устанавливаем необходимые пакеты
-        sdkmanager "platform-tools" "platforms;android-33" "build-tools;33.0.0"
+        # Устанавливаем необходимые компоненты
+        cmdline-tools/bin/sdkmanager "platform-tools" "platforms;android-33" "build-tools;33.0.0"
         
-        cd ..
+        # Возвращаемся в рабочую директорию
+        cd /home/runner/work/$(echo ${{ github.repository }} | cut -d'/' -f2)/
     
     - name: Build APK
       run: |
+        # Переходим в Android директорию
         cd android
         
-        # Делаем gradlew исполняемым
+        # Даём права на выполнение gradlew
         chmod +x gradlew
         
         # Собираем APK
-        ./gradlew assembleDebug --stacktrace
+        ./gradlew assembleDebug --no-daemon
     
     - uses: actions/upload-artifact@v4
       with:
-        name: android-apk
+        name: android-app
         path: android/app/build/outputs/apk/debug/*.apk
