@@ -1,4 +1,4 @@
-name: Build Android APK
+name: Build APK from Web App
 
 on: [push]
 
@@ -9,114 +9,71 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     
-    - name: Setup Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: '18'
-    
-    - name: Prepare dist folder
+    - name: Create web files
       run: |
-        # Удаляем старые папки
+        # Удаляем старые папки если есть
         rm -rf dist android
         
-        # Создаём dist и копируем файлы
-        mkdir -p dist
+        # Создаём новую папку
+        mkdir dist
         
-        # Копируем HTML файлы
-        find . -name "*.html" -not -path "./node_modules/*" -not -path "./dist/*" -exec cp {} dist/ \;
+        # Создаём простой index.html
+        echo '<html>' > dist/index.html
+        echo '<head><title>My App</title></head>' >> dist/index.html
+        echo '<body><h1>Hello World</h1><p>Android App</p></body>' >> dist/index.html
+        echo '</html>' >> dist/index.html
         
-        # Копируем CSS файлы
-        find . -name "*.css" -not -path "./node_modules/*" -not -path "./dist/*" -exec cp {} dist/ \;
-        
-        # Копируем JS файлы
-        find . -name "*.js" -not -path "./node_modules/*" -not -path "./dist/*" -exec cp {} dist/ \;
-        
-        # Если нет index.html, создаём его
-        if [ ! -f "dist/index.html" ]; then
-          echo '<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>My App</title>
-</head>
-<body>
-    <h1>Welcome to My App</h1>
-    <p>This is a web application converted to Android.</p>
-</body>
-</html>' > dist/index.html
-          echo "Created default index.html"
-        fi
-        
-        echo "Files in dist:"
+        # Показываем что получилось
         ls -la dist/
     
-    - name: Install Capacitor
+    - name: Setup Capacitor
       run: |
-        # Устанавливаем Capacitor глобально
-        npm install -g @capacitor/cli @capacitor/core @capacitor/android
-    
-    - name: Initialize Capacitor
-      run: |
-        # Создаём конфигурационный файл вручную
-        echo '{
-          "appId": "com.myapp.android",
-          "appName": "MyApp",
-          "webDir": "dist",
-          "bundledWebRuntime": false
-        }' > capacitor.config.json
+        # Устанавливаем Capacitor
+        npm install -g @capacitor/cli
         
-        # Инициализируем Capacitor без интерактивного режима
-        npx cap init "MyApp" "com.myapp.android" --web-dir dist
+        # Создаём конфиг
+        echo '{"appId":"com.myapp.android","appName":"MyApp","webDir":"dist"}' > capacitor.config.json
         
-        # Добавляем Android платформу
+        # Инициализируем
+        echo "" | npx cap init
+        
+        # Добавляем Android
         npx cap add android
         
         # Копируем файлы
         npx cap copy
-        
-        # Синхронизируем
-        npx cap sync
     
-    - name: Setup Android SDK
+    - name: Setup Android
       run: |
         # Устанавливаем Java
-        apt-get update
-        apt-get install -y openjdk-11-jdk
+        sudo apt update
+        sudo apt install -y openjdk-11-jdk wget unzip
         
-        # Создаём Android SDK директорию
-        mkdir -p /home/runner/android-sdk
+        # Скачиваем Android SDK
+        wget https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
+        unzip commandlinetools-linux-9477386_latest.zip
         
-        # Скачиваем Command Line Tools
-        cd /home/runner/android-sdk
-        wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
-        unzip -q commandlinetools-linux-9477386_latest.zip
+        # Создаём структуру
+        mkdir -p android-sdk/cmdline-tools
+        mv cmdline-tools android-sdk/cmdline-tools/latest
         
-        # Настраиваем переменные окружения
-        echo "ANDROID_SDK_ROOT=/home/runner/android-sdk" >> $GITHUB_ENV
-        echo "PATH=$PATH:/home/runner/android-sdk/cmdline-tools/bin" >> $GITHUB_ENV
+        # Настраиваем переменные
+        export ANDROID_SDK_ROOT=$(pwd)/android-sdk
+        export PATH=$PATH:$ANDROID_SDK_ROOT/cmdline-tools/latest/bin
         
-        # Принимаем лицензии
-        yes | cmdline-tools/bin/sdkmanager --licenses 2>/dev/null || true
+        # Принимаем лицензии (автоматически)
+        yes | sdkmanager --licenses > /dev/null 2>&1
         
-        # Устанавливаем необходимые компоненты
-        cmdline-tools/bin/sdkmanager "platform-tools" "platforms;android-33" "build-tools;33.0.0" 2>/dev/null || true
-        
-        # Возвращаемся в рабочую директорию
-        cd /home/runner/work/$(echo ${{ github.repository }} | cut -d'/' -f2)/
+        # Устанавливаем компоненты
+        sdkmanager "platform-tools" "platforms;android-33" "build-tools;33.0.0"
     
     - name: Build APK
       run: |
-        # Переходим в Android директорию
         cd android
-        
-        # Даём права на выполнение gradlew
         chmod +x gradlew
-        
-        # Собираем APK
-        ./gradlew assembleDebug --no-daemon
+        ./gradlew assembleDebug
     
     - uses: actions/upload-artifact@v4
       with:
-        name: android-app
+        name: app-apk
         path: android/app/build/outputs/apk/debug/*.apk
