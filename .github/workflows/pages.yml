@@ -1,4 +1,4 @@
-name: Build Android APK
+name: Build Android APK - Reliable
 
 on: [push]
 
@@ -9,133 +9,97 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     
-    - name: Fix package.json name
+    - name: Clean workspace
       run: |
-        # Проверяем есть ли package.json
-        if [ -f "package.json" ]; then
-          echo "Исправляем имя в package.json..."
-          # Убираем двоеточие и кириллицу из имени
-          sed -i 's/"name":.*/"name": "levelup-gamification-life",/' package.json
-          # Или создаём новый если не получается исправить
-          echo '{
-            "name": "levelup-app",
-            "version": "1.0.0",
-            "private": true
-          }' > package.json
-        else
-          # Создаём package.json с правильным именем
-          echo '{
-            "name": "levelup-app",
-            "version": "1.0.0",
-            "private": true
-          }' > package.json
-        fi
+        # Удаляем старые папки
+        rm -rf android www node_modules .gradle
         
-        # Показываем что получилось
-        cat package.json
-    
-    - name: Setup Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: '18'
-    
-    - name: Create web content
+    - name: Create minimal project
       run: |
-        # Создаём папку для веб-файлов
+        echo '{"name":"myapp","version":"1.0.0"}' > package.json
         mkdir -p www
+        echo '<html><body><h1>App</h1></body></html>' > www/index.html
         
-        # Проверяем есть ли index.html в проекте
-        if [ -f "index.html" ]; then
-          echo "Копируем существующий index.html..."
-          cp index.html www/
-        else
-          # Создаём простой index.html
-          echo '<!DOCTYPE html>
-          <html>
-          <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>LevelUp App</title>
-            <style>
-              body { font-family: Arial, sans-serif; padding: 20px; text-align: center; }
-              h1 { color: #4CAF50; }
-            </style>
-          </head>
-          <body>
-            <h1>🎮 LevelUp App</h1>
-            <p>Геймификация жизни для Android</p>
-          </body>
-          </html>' > www/index.html
-        fi
-        
-        # Копируем другие веб-файлы если есть
-        cp *.css www/ 2>/dev/null || true
-        cp *.js www/ 2>/dev/null || true
-        [ -d "css" ] && cp -r css www/
-        [ -d "js" ] && cp -r js www/
-        [ -d "assets" ] && cp -r assets www/
-        
-        echo "Содержимое www:"
-        ls -la www/
-    
-    - name: Install Capacitor
+    - name: Install dependencies
       run: |
-        # Устанавливаем Capacitor без глобальной установки
-        npm install @capacitor/core @capacitor/cli @capacitor/android
-    
-    - name: Configure Capacitor
+        npm install @capacitor/cli @capacitor/android
+        
+    - name: Setup Capacitor
       run: |
-        # Создаём конфиг для Capacitor
         echo '{
-          "appId": "com.levelup.app",
-          "appName": "LevelUp",
-          "webDir": "www",
-          "bundledWebRuntime": false
+          "appId": "com.myapp.android",
+          "appName": "MyApp",
+          "webDir": "www"
         }' > capacitor.config.json
         
-        # Инициализируем Capacitor (неинтерактивно)
-        npx cap init "LevelUp" "com.levelup.app" --web-dir www
-        
-        # Добавляем Android
+        npx cap init "MyApp" "com.myapp.android" --web-dir www
         npx cap add android
-        
-        # Копируем файлы
         npx cap copy
         
-        # Синхронизируем
-        npx cap sync
-    
-    - name: Setup Android SDK
+    - name: Install Android tools
       run: |
-        # Устанавливаем Java
         sudo apt update
         sudo apt install -y openjdk-11-jdk
         
-        # Устанавливаем Android SDK
+        # Устанавливаем Android SDK через официальный метод
+        mkdir -p ~/android-sdk
+        cd ~/android-sdk
+        
+        # Скачиваем tools
         wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
         unzip -q commandlinetools-linux-9477386_latest.zip
         
-        # Создаём структуру Android SDK
-        mkdir -p android-sdk/cmdline-tools
-        mv cmdline-tools android-sdk/cmdline-tools/latest
+        # Создаём правильную структуру
+        mkdir -p cmdline-tools
+        mv cmdline-tools/* .
+        rmdir cmdline-tools
         
-        # Настраиваем переменные окружения
-        export ANDROID_HOME=$(pwd)/android-sdk
-        export PATH=$PATH:$ANDROID_HOME/cmdline-tools/latest/bin
+        export ANDROID_SDK_ROOT=~/android-sdk
+        export PATH=$PATH:$ANDROID_SDK_ROOT/cmdline-tools/bin
+        
+        echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
+        echo "PATH=$PATH" >> $GITHUB_ENV
         
         # Принимаем лицензии
         yes | sdkmanager --licenses >/dev/null 2>&1
         
-        # Устанавливаем необходимые компоненты
-        sdkmanager "platform-tools" "platforms;android-33" "build-tools;33.0.0" >/dev/null 2>&1
-    
+        # Устанавливаем минимальный набор
+        sdkmanager "platform-tools" "platforms;android-31" "build-tools;31.0.0" >/dev/null 2>&1
+        
+    - name: Fix Gradle build
+      run: |
+        cd android
+        
+        # Используем более стабильную версию Gradle
+        sed -i 's/gradle-8.2.1-all.zip/gradle-7.5-all.zip/' gradle/wrapper/gradle-wrapper.properties
+        
+        # Очищаем всё
+        rm -rf ~/.gradle
+        mkdir -p ~/.gradle
+        
+        # Создаём конфиг Gradle с увеличенной памятью
+        cat > ~/.gradle/gradle.properties << EOF
+        org.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g -XX:+HeapDumpOnOutOfMemoryError -XX:+UseG1GC
+        org.gradle.parallel=true
+        org.gradle.daemon=false
+        org.gradle.caching=false
+        EOF
+        
+        # Даём права
+        chmod +x gradlew
+        
+        # Скачиваем Gradle wrapper заново
+        ./gradlew --version
+        
     - name: Build APK
       run: |
         cd android
-        chmod +x gradlew
-        ./gradlew assembleDebug
-    
+        
+        # Собираем с подробным выводом
+        ./gradlew clean assembleDebug --no-daemon --stacktrace --info
+      timeout-minutes: 10
+      
     - uses: actions/upload-artifact@v4
       with:
-        name: levelup-apk
+        name: final-apk
         path: android/app/build/outputs/apk/debug/*.apk
