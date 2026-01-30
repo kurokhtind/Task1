@@ -1,4 +1,4 @@
-name: Build Android APK - Reliable
+name: Android APK Build
 
 on: [push]
 
@@ -9,97 +9,37 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     
-    - name: Clean workspace
+    - name: Setup environment
       run: |
-        # Удаляем старые папки
-        rm -rf android www node_modules .gradle
-        
-    - name: Create minimal project
-      run: |
-        echo '{"name":"myapp","version":"1.0.0"}' > package.json
+        echo '{"name":"levelup-app","version":"1.0.0"}' > package.json
         mkdir -p www
-        echo '<html><body><h1>App</h1></body></html>' > www/index.html
-        
-    - name: Install dependencies
+        echo '<html><body><h1>LevelUp</h1></body></html>' > www/index.html
+    
+    - name: Install Capacitor
       run: |
         npm install @capacitor/cli @capacitor/android
-        
-    - name: Setup Capacitor
+    
+    - name: Configure Capacitor
       run: |
-        echo '{
-          "appId": "com.myapp.android",
-          "appName": "MyApp",
-          "webDir": "www"
-        }' > capacitor.config.json
-        
-        npx cap init "MyApp" "com.myapp.android" --web-dir www
+        echo '{"appId":"com.levelup.app","appName":"LevelUp","webDir":"www"}' > capacitor.config.json
+        npx cap init
         npx cap add android
         npx cap copy
-        
-    - name: Install Android tools
-      run: |
-        sudo apt update
-        sudo apt install -y openjdk-11-jdk
-        
-        # Устанавливаем Android SDK через официальный метод
-        mkdir -p ~/android-sdk
-        cd ~/android-sdk
-        
-        # Скачиваем tools
-        wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
-        unzip -q commandlinetools-linux-9477386_latest.zip
-        
-        # Создаём правильную структуру
-        mkdir -p cmdline-tools
-        mv cmdline-tools/* .
-        rmdir cmdline-tools
-        
-        export ANDROID_SDK_ROOT=~/android-sdk
-        export PATH=$PATH:$ANDROID_SDK_ROOT/cmdline-tools/bin
-        
-        echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
-        echo "PATH=$PATH" >> $GITHUB_ENV
-        
-        # Принимаем лицензии
-        yes | sdkmanager --licenses >/dev/null 2>&1
-        
-        # Устанавливаем минимальный набор
-        sdkmanager "platform-tools" "platforms;android-31" "build-tools;31.0.0" >/dev/null 2>&1
-        
-    - name: Fix Gradle build
+    
+    - name: Use GitHub's Android setup
+      uses: android-actions/setup-android@v3
+    
+    - name: Fix Gradle and build
       run: |
         cd android
-        
         # Используем более стабильную версию Gradle
         sed -i 's/gradle-8.2.1-all.zip/gradle-7.5-all.zip/' gradle/wrapper/gradle-wrapper.properties
-        
-        # Очищаем всё
-        rm -rf ~/.gradle
-        mkdir -p ~/.gradle
-        
-        # Создаём конфиг Gradle с увеличенной памятью
-        cat > ~/.gradle/gradle.properties << EOF
-        org.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g -XX:+HeapDumpOnOutOfMemoryError -XX:+UseG1GC
-        org.gradle.parallel=true
-        org.gradle.daemon=false
-        org.gradle.caching=false
-        EOF
-        
-        # Даём права
-        chmod +x gradlew
-        
-        # Скачиваем Gradle wrapper заново
-        ./gradlew --version
-        
-    - name: Build APK
-      run: |
-        cd android
-        
-        # Собираем с подробным выводом
-        ./gradlew clean assembleDebug --no-daemon --stacktrace --info
-      timeout-minutes: 10
-      
+        # Очищаем кэш
+        rm -rf ~/.gradle/caches
+        # Собираем APK
+        ./gradlew assembleDebug --no-daemon
+    
     - uses: actions/upload-artifact@v4
       with:
-        name: final-apk
+        name: apk-file
         path: android/app/build/outputs/apk/debug/*.apk
