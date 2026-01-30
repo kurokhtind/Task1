@@ -3,52 +3,141 @@ name: Build Android APK
 on: [push]
 
 jobs:
-  build-android:
+  build:
     runs-on: ubuntu-latest
     
     steps:
-    # 1. Получаем код
     - uses: actions/checkout@v4
     
-    # 2. Устанавливаем Node.js (БЕЗ кэширования)
-    - uses: actions/setup-node@v4
-      with:
-        node-version: '18'
-    
-    # 3. Создаём dist папку и копируем файлы
-    - name: Prepare web files
+    - name: Prepare environment
       run: |
+        # Удаляем файл dist если он существует как файл
+        if [ -f "dist" ]; then
+          echo "Удаляем файл dist"
+          rm -f dist
+        fi
+        
+        # Удаляем папку dist если она существует
+        if [ -d "dist" ]; then
+          echo "Удаляем папку dist"
+          rm -rf dist
+        fi
+        
+        # Создаём новую папку dist
         mkdir -p dist
-        # Копируем HTML, CSS, JS файлы
-        cp *.html dist/ 2>/dev/null || true
-        cp *.css dist/ 2>/dev/null || true
-        cp *.js dist/ 2>/dev/null || true
-        # Копируем папки если они есть
-        [ -d "css" ] && cp -r css dist/
-        [ -d "js" ] && cp -r js dist/
-        [ -d "images" ] && cp -r images dist/
-        [ -d "assets" ] && cp -r assets dist/
+        echo "Папка dist создана"
+        
+        # Показываем текущую директорию
+        pwd
+        ls -la
     
-    # 4. Устанавливаем Capacitor
+    - name: Copy web files
+      run: |
+        # Копируем файлы в dist
+        echo "Копируем файлы..."
+        
+        # HTML файлы
+        for file in *.html; do
+          if [ -f "$file" ]; then
+            cp "$file" dist/
+            echo "Скопирован: $file"
+          fi
+        done
+        
+        # CSS файлы
+        for file in *.css; do
+          if [ -f "$file" ]; then
+            cp "$file" dist/
+            echo "Скопирован: $file"
+          fi
+        done
+        
+        # JS файлы
+        for file in *.js; do
+          if [ -f "$file" ]; then
+            cp "$file" dist/
+            echo "Скопирован: $file"
+          fi
+        done
+        
+        # Копируем папки если они есть
+        [ -d "css" ] && cp -r css dist/ && echo "Скопирована папка: css"
+        [ -d "js" ] && cp -r js dist/ && echo "Скопирована папка: js"
+        [ -d "images" ] && cp -r images dist/ && echo "Скопирована папка: images"
+        [ -d "assets" ] && cp -r assets dist/ && echo "Скопирована папка: assets"
+        
+        # Показываем что получилось
+        echo "Содержимое dist:"
+        ls -la dist/
+    
     - name: Install Capacitor
       run: |
+        # Устанавливаем Node.js если не установлен
+        if ! command -v node &> /dev/null; then
+          echo "Устанавливаем Node.js..."
+          curl -fsSL https://deb.nodesource.com/setup_18.x | bash -
+          apt-get install -y nodejs
+        fi
+        
         npm install -g @capacitor/cli
+    
+    - name: Initialize Capacitor
+      run: |
+        # Проверяем есть ли файлы в dist
+        if [ -z "$(ls -A dist/ 2>/dev/null)" ]; then
+          echo "Папка dist пуста, создаём index.html"
+          echo '<!DOCTYPE html>
+          <html>
+          <head>
+              <title>My App</title>
+          </head>
+          <body>
+              <h1>Hello World!</h1>
+          </body>
+          </html>' > dist/index.html
+        fi
+        
+        # Инициализируем Capacitor
         npx cap init "MyApp" "com.example.myapp" --web-dir dist -y
         npx cap add android
         npx cap copy
     
-    # 5. Устанавливаем Android SDK
     - name: Setup Android SDK
-      uses: android-actions/setup-android@v3
+      run: |
+        # Устанавливаем Java
+        apt-get update
+        apt-get install -y openjdk-11-jdk
+        
+        # Устанавливаем Android SDK
+        mkdir -p android-sdk
+        cd android-sdk
+        
+        # Скачиваем Command Line Tools
+        wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
+        unzip -q commandlinetools-linux-9477386_latest.zip
+        
+        # Настраиваем переменные окружения
+        export ANDROID_SDK_ROOT=$(pwd)
+        export PATH=$PATH:$(pwd)/cmdline-tools/bin
+        
+        # Принимаем лицензии
+        yes | sdkmanager --licenses || true
+        
+        # Устанавливаем необходимые пакеты
+        sdkmanager "platform-tools" "platforms;android-33" "build-tools;33.0.0"
+        
+        cd ..
     
-    # 6. Собираем APK
     - name: Build APK
       run: |
         cd android
+        
+        # Делаем gradlew исполняемым
         chmod +x gradlew
-        ./gradlew assembleDebug
+        
+        # Собираем APK
+        ./gradlew assembleDebug --stacktrace
     
-    # 7. Загружаем APK
     - uses: actions/upload-artifact@v4
       with:
         name: android-apk
