@@ -1,4 +1,4 @@
-name: Android APK Build
+name: Build Android APK
 
 on: [push]
 
@@ -9,37 +9,133 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     
-    - name: Setup environment
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+    
+    - name: Fix package.json
       run: |
-        echo '{"name":"levelup-app","version":"1.0.0"}' > package.json
+        echo '{"name":"levelup-app","version":"1.0.0","private":true}' > package.json
+    
+    - name: Prepare web files
+      run: |
         mkdir -p www
-        echo '<html><body><h1>LevelUp</h1></body></html>' > www/index.html
+        if [ -f "index.html" ]; then
+          cp index.html www/
+        else
+          echo '<!DOCTYPE html>
+          <html>
+          <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>LevelUp App</title>
+          </head>
+          <body>
+            <h1>LevelUp - Геймификация жизни</h1>
+            <p>Ваше приложение для Android</p>
+          </body>
+          </html>' > www/index.html
+        fi
+        
+        # Копируем другие файлы
+        cp *.css www/ 2>/dev/null || true
+        cp *.js www/ 2>/dev/null || true
+        [ -d "css" ] && cp -r css www/
+        [ -d "js" ] && cp -r js www/
     
     - name: Install Capacitor
       run: |
-        npm install @capacitor/cli @capacitor/android
+        npm install @capacitor/cli @capacitor/core @capacitor/android
     
     - name: Configure Capacitor
       run: |
-        echo '{"appId":"com.levelup.app","appName":"LevelUp","webDir":"www"}' > capacitor.config.json
-        npx cap init
+        echo '{
+          "appId": "com.levelup.app",
+          "appName": "LevelUp",
+          "webDir": "www",
+          "bundledWebRuntime": false
+        }' > capacitor.config.json
+        
+        npx cap init "LevelUp" "com.levelup.app" --web-dir www
         npx cap add android
         npx cap copy
     
-    - name: Use GitHub's Android setup
-      uses: android-actions/setup-android@v3
+    - name: Install Java 21
+      run: |
+        sudo apt update
+        # Устанавливаем Java 21
+        sudo apt install -y openjdk-21-jdk
+        # Проверяем установку
+        java -version
     
-    - name: Fix Gradle and build
+    - name: Setup Android SDK
+      run: |
+        # Устанавливаем Android SDK
+        sudo apt install -y wget unzip
+        
+        # Создаём папку для Android SDK
+        mkdir -p ~/android-sdk
+        
+        # Скачиваем Android Command Line Tools
+        cd ~/android-sdk
+        wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
+        unzip -q commandlinetools-linux-9477386_latest.zip
+        
+        # Создаём правильную структуру
+        mkdir -p cmdline-tools
+        mv cmdline-tools/* .
+        rmdir cmdline-tools 2>/dev/null || true
+        
+        # Настраиваем переменные окружения
+        echo "ANDROID_SDK_ROOT=~/android-sdk" >> $GITHUB_ENV
+        echo "PATH=$PATH:~/android-sdk/cmdline-tools/bin" >> $GITHUB_ENV
+        
+        # Принимаем лицензии без использования yes
+        # Создаем файлы лицензий вручную
+        mkdir -p ~/.android/licenses
+        echo "8933bad161af4178b1185d1a37fbf41ea5269c55" > ~/.android/licenses/android-sdk-license
+        echo "d56f5187479451eabf01fb78af6dfcb131a6481e" >> ~/.android/licenses/android-sdk-license
+        echo "84831b9409646a918e30573bab4c9c91346d8abd" > ~/.android/licenses/android-sdk-preview-license
+        
+        # Устанавливаем компоненты Android
+        ./cmdline-tools/bin/sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0" --sdk_root=~/android-sdk >/dev/null 2>&1 || true
+        
+        # Возвращаемся в рабочую директорию
+        cd $GITHUB_WORKSPACE
+    
+    - name: Update Android project for Java 21
+      run: |
+        if [ -d "android" ]; then
+          cd android
+          # Добавляем настройки для Java 21 в build.gradle
+          if grep -q "compileOptions" app/build.gradle 2>/dev/null; then
+            # Если уже есть compileOptions, обновляем их
+            sed -i 's/sourceCompatibility JavaVersion.VERSION_[0-9]*/sourceCompatibility JavaVersion.VERSION_21/' app/build.gradle
+            sed -i 's/targetCompatibility JavaVersion.VERSION_[0-9]*/targetCompatibility JavaVersion.VERSION_21/' app/build.gradle
+          else
+            # Добавляем compileOptions если их нет
+            sed -i '/android {/a\    compileOptions {\n        sourceCompatibility JavaVersion.VERSION_21\n        targetCompatibility JavaVersion.VERSION_21\n    }' app/build.gradle
+          fi
+          
+          # Добавляем настройки памяти в gradle.properties
+          echo "org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8" > gradle.properties
+          echo "org.gradle.daemon=false" >> gradle.properties
+        fi
+    
+    - name: Build APK with Java 21
       run: |
         cd android
-        # Используем более стабильную версию Gradle
-        sed -i 's/gradle-8.2.1-all.zip/gradle-7.5-all.zip/' gradle/wrapper/gradle-wrapper.properties
-        # Очищаем кэш
-        rm -rf ~/.gradle/caches
-        # Собираем APK
-        ./gradlew assembleDebug --no-daemon
+        chmod +x gradlew
+        
+        # Проверяем версию Java
+        echo "Java version:"
+        java -version
+        
+        # Очищаем и собираем с отключенным daemon
+        ./gradlew clean assembleDebug --no-daemon --stacktrace
     
     - uses: actions/upload-artifact@v4
       with:
-        name: apk-file
+        name: levelup-android-apk
         path: android/app/build/outputs/apk/debug/*.apk
