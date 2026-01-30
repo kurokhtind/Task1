@@ -25,6 +25,12 @@ const INITIAL_STATS: UserStats = {
 const App: React.FC = () => {
   // Theme State
   const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
+    // Priority 1: Telegram Theme
+    const tg = window.Telegram?.WebApp;
+    if (tg && tg.colorScheme) {
+        return tg.colorScheme === 'dark';
+    }
+    // Priority 2: Local Storage
     const saved = localStorage.getItem('levelup_theme');
     return saved === 'dark' || (!saved && window.matchMedia('(prefers-color-scheme: dark)').matches);
   });
@@ -62,6 +68,24 @@ const App: React.FC = () => {
   const [useDeadline, setUseDeadline] = useState(false);
   const [timeValue, setTimeValue] = useState(''); // HH:MM
   const [deadlineValue, setDeadlineValue] = useState(''); // YYYY-MM-DDTHH:MM
+
+  // Initialize Telegram Web App
+  useEffect(() => {
+    const tg = window.Telegram?.WebApp;
+    if (tg) {
+        tg.ready();
+        tg.expand(); // Open full height
+        
+        // Sync header colors with app theme
+        if (isDarkMode) {
+            tg.setHeaderColor('#030712'); // gray-950
+            tg.setBackgroundColor('#030712');
+        } else {
+            tg.setHeaderColor('#ffffff');
+            tg.setBackgroundColor('#f9fafb'); // gray-50
+        }
+    }
+  }, [isDarkMode]);
 
   // Theme Effect
   useEffect(() => {
@@ -354,7 +378,7 @@ const App: React.FC = () => {
   const globalTasks = tasks.filter(t => t.type === TaskType.ONE_TIME && !t.deadline);
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-gray-100 pb-28 font-sans max-w-md mx-auto relative shadow-2xl overflow-hidden transition-colors duration-300">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-gray-100 pb-32 font-sans max-w-md mx-auto relative shadow-2xl transition-colors duration-300 overflow-x-hidden">
       
       {/* Header - Fixed Position */}
       <div className="fixed top-0 z-40 w-full max-w-md left-0 right-0 mx-auto bg-white/90 dark:bg-gray-900/90 backdrop-blur-md h-16 flex items-center px-6 shadow-sm border-b border-gray-100 dark:border-gray-800 transition-colors duration-300 justify-between">

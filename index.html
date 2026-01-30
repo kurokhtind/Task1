@@ -2,8 +2,14 @@
 <html lang="ru">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+    <meta name="theme-color" content="#030712" media="(prefers-color-scheme: dark)">
     <title>LevelUp Daily</title>
+    <!-- Telegram Web App SDK -->
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <!-- Removed leading slash for relative path support on GitHub Pages -->
+    <link rel="manifest" href="manifest.json">
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
       tailwind.config = {
@@ -25,7 +31,20 @@
         font-family: 'Roboto', sans-serif;
         /* background-color set via utility classes in App.tsx */
         -webkit-tap-highlight-color: transparent;
+        -webkit-user-select: none; /* Disable text selection mostly */
+        user-select: none;
+        /* Handle Safe Areas (Notch, Home Indicator) */
+        padding-top: env(safe-area-inset-top);
+        padding-bottom: env(safe-area-inset-bottom); 
+        overscroll-behavior-y: none; /* Prevent pull-to-refresh effect */
       }
+      
+      /* Allow text selection in inputs */
+      input, textarea {
+        -webkit-user-select: text;
+        user-select: text;
+      }
+
       /* Custom Scrollbar */
       ::-webkit-scrollbar {
         width: 0px;
@@ -73,8 +92,12 @@
   }
 }
 </script>
+<link rel="stylesheet" href="/index.css">
 </head>
   <body>
     <div id="root"></div>
-  </body>
+    <!-- Entry point needed for Vite -->
+    <script type="module" src="./index.tsx"></script>
+  <script type="module" src="/index.tsx"></script>
+</body>
 </html>

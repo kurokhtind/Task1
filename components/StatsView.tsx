@@ -126,7 +126,7 @@ const StatsView: React.FC<StatsViewProps> = ({
   }, [tasks]);
 
   return (
-    <div className="w-full h-full pb-24 animate-fade-in">
+    <div className="w-full animate-fade-in">
       <div className="p-1 space-y-5">
         
         {/* Profile Card */}
