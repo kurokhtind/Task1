@@ -1,32 +1,80 @@
-name: Build APK
-on: [push]
+name: Build Android APK
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:  # Позволяет запускать вручную
+
 jobs:
-  build:
+  build-android:
     runs-on: ubuntu-latest
+    
     steps:
-      - uses: actions/checkout@v2
-      - name: Setup Node.js
-        uses: actions/setup-node@v2
+      # 1. Получаем код из репозитория
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+      
+      # 2. Устанавливаем Node.js
+      - name: 🟢 Setup Node.js
+        uses: actions/setup-node@v4
         with:
-          node-version: '18'
-      - name: Install dependencies
-        run: npm install
-      - name: Build web app
+          node-version: '20'  # Последняя LTS версия
+          cache: 'npm'
+      
+      # 3. Устанавливаем зависимости проекта
+      - name: 📦 Install dependencies
+        run: npm ci  # Более строгий, чем npm install
+      
+      # 4. Собираем веб-приложение
+      - name: 🏗️ Build web app
         run: npm run build
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v2
-      - name: Install Capacitor
+      
+      # 5. Устанавливаем Android SDK
+      - name: 🤖 Setup Android SDK
+        uses: android-actions/setup-android@v3
+      
+      # 6. Устанавливаем Capacitor и собираем Android проект
+      - name: ⚡ Build with Capacitor
         run: |
-          npm install @capacitor/core @capacitor/cli @capacitor/android
-          npx cap init --web-dir build --app-id com.example.app --app-name MyApp -y
+          # Устанавливаем Capacitor глобально (можно и локально)
+          npm install -g @capacitor/cli
+          
+          # Инициализируем Capacitor если нет capacitor.config.json
+          if [ ! -f "capacitor.config.json" ]; then
+            npx cap init "MyApp" "com.example.myapp"
+          fi
+          
+          # Добавляем Android платформу
           npx cap add android
-      - name: Build APK
-        run: |
+          
+          # Копируем веб-файлы в Android проект
           npx cap copy
+          
+          # Синхронизируем
+          npx cap sync android
+      
+      # 7. Собираем APK
+      - name: 🔨 Build APK
+        run: |
           cd android
+          chmod +x ./gradlew  # Делаем gradlew исполняемым
           ./gradlew assembleDebug
-      - name: Upload APK
-        uses: actions/upload-artifact@v2
+      
+      # 8. Загружаем APK как артефакт (используем v4)
+      - name: 📤 Upload APK artifact
+        uses: actions/upload-artifact@v4
         with:
-          name: app-debug
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          name: android-apk
+          path: |
+            android/app/build/outputs/apk/debug/*.apk
+            android/app/build/outputs/apk/debug/output-metadata.json
+          retention-days: 7
+      
+      # 9. (Опционально) Создаём релиз
+      - name: 🚀 Create Release
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: android/app/build/outputs/apk/debug/*.apk
