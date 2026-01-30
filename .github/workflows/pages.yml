@@ -1,4 +1,4 @@
-name: Build APK from Web App
+name: Build Web to Android APK
 
 on: [push]
 
@@ -9,71 +9,114 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     
-    - name: Create web files
+    - name: Setup Node.js and npm
       run: |
-        # Удаляем старые папки если есть
-        rm -rf dist android
+        # Устанавливаем Node.js вручную (без setup-node action)
+        curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+        sudo apt-get install -y nodejs
         
-        # Создаём новую папку
-        mkdir dist
-        
-        # Создаём простой index.html
-        echo '<html>' > dist/index.html
-        echo '<head><title>My App</title></head>' >> dist/index.html
-        echo '<body><h1>Hello World</h1><p>Android App</p></body>' >> dist/index.html
-        echo '</html>' >> dist/index.html
-        
-        # Показываем что получилось
-        ls -la dist/
+        # Проверяем установку
+        node --version
+        npm --version
     
-    - name: Setup Capacitor
+    - name: Create project structure
       run: |
-        # Устанавливаем Capacitor
-        npm install -g @capacitor/cli
+        # Создаём папку для веб-приложения
+        mkdir -p www
         
-        # Создаём конфиг
-        echo '{"appId":"com.myapp.android","appName":"MyApp","webDir":"dist"}' > capacitor.config.json
+        # Копируем существующие файлы или создаём демо
+        if ls *.html 1> /dev/null 2>&1; then
+          cp *.html www/ 2>/dev/null || true
+        else
+          echo '<!DOCTYPE html>
+          <html lang="en">
+          <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>My Application</title>
+            <style>
+              body { font-family: Arial, sans-serif; text-align: center; padding: 2rem; }
+              h1 { color: #2196F3; }
+            </style>
+          </head>
+          <body>
+            <h1>My Web App</h1>
+            <p>Successfully converted to Android APK!</p>
+          </body>
+          </html>' > www/index.html
+        fi
         
-        # Инициализируем
-        echo "" | npx cap init
+        # Копируем остальные файлы
+        cp *.css www/ 2>/dev/null || true
+        cp *.js www/ 2>/dev/null || true
+    
+    - name: Install Capacitor with specific version
+      run: |
+        # Устанавливаем конкретную версию Capacitor (более стабильную)
+        npm init -y
+        npm install @capacitor/core@^5.0.0 @capacitor/cli@^5.0.0 @capacitor/android@^5.0.0
+    
+    - name: Configure Capacitor manually
+      run: |
+        # Создаём конфигурационный файл вручную
+        cat > capacitor.config.json << 'CONFIG'
+        {
+          "appId": "com.mycompany.myapp",
+          "appName": "MyApp",
+          "webDir": "www",
+          "bundledWebRuntime": false,
+          "plugins": {
+            "SplashScreen": {
+              "launchShowDuration": 3000
+            }
+          }
+        }
+        CONFIG
         
-        # Добавляем Android
+        # Инициализируем Capacitor (пропускаем вопросы)
+        npx cap init --app-name "MyApp" --app-id "com.mycompany.myapp" --web-dir www --npm-client npm --force
+        
+        # Добавляем Android платформу
         npx cap add android
-        
-        # Копируем файлы
-        npx cap copy
     
-    - name: Setup Android
+    - name: Copy web assets to Android
       run: |
-        # Устанавливаем Java
+        npx cap copy
+        npx cap sync android
+    
+    - name: Setup Android build environment
+      run: |
+        # Устанавливаем Java 11
         sudo apt update
-        sudo apt install -y openjdk-11-jdk wget unzip
+        sudo apt install -y openjdk-11-jdk-headless
         
-        # Скачиваем Android SDK
-        wget https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
-        unzip commandlinetools-linux-9477386_latest.zip
+        # Скачиваем Android Command Line Tools
+        wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
+        unzip -q commandlinetools-linux-9477386_latest.zip
         
-        # Создаём структуру
-        mkdir -p android-sdk/cmdline-tools
-        mv cmdline-tools android-sdk/cmdline-tools/latest
+        # Создаём структуру Android SDK
+        mkdir -p android-sdk
+        mv cmdline-tools android-sdk/
         
-        # Настраиваем переменные
-        export ANDROID_SDK_ROOT=$(pwd)/android-sdk
-        export PATH=$PATH:$ANDROID_SDK_ROOT/cmdline-tools/latest/bin
+        # Устанавливаем переменные окружения
+        echo "ANDROID_SDK_ROOT=$PWD/android-sdk" >> $GITHUB_ENV
+        echo "PATH=$PATH:$PWD/android-sdk/cmdline-tools/bin" >> $GITHUB_ENV
         
         # Принимаем лицензии (автоматически)
-        yes | sdkmanager --licenses > /dev/null 2>&1
+        yes | $PWD/android-sdk/cmdline-tools/bin/sdkmanager --licenses > /dev/null 2>&1
         
-        # Устанавливаем компоненты
-        sdkmanager "platform-tools" "platforms;android-33" "build-tools;33.0.0"
+        # Устанавливаем необходимые компоненты
+        $PWD/android-sdk/cmdline-tools/bin/sdkmanager "platform-tools" "platforms;android-33" "build-tools;33.0.0" > /dev/null 2>&1
     
-    - name: Build APK
+    - name: Build Android APK
       run: |
         cd android
         chmod +x gradlew
-        ./gradlew assembleDebug
+        ./gradlew assembleDebug --no-daemon --stacktrace
     
-    - uses: actions/upload-artifact@v4
+    - name: Upload APK artifact
+      uses: actions/upload-artifact@v4
       with:
-        name: app-apk
+        name: android-application
         path: android/app/build/outputs/apk/debug/*.apk
+        retention-days: 7
